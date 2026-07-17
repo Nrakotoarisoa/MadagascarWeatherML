@@ -14,10 +14,4 @@
     <PackageReference Include="Microsoft.ML.LightGbm" Version="3.0.1" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Le script Python de génération de données de démonstration n'est pas du code à compiler. -->
-    <Compile Remove="tools/**/*.cs" />
-    <None Include="tools/generate_sample_data.py" />
-  </ItemGroup>
-
 </Project>
