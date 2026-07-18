@@ -32,8 +32,9 @@ namespace MadagascarWeatherML.Datasets
 
         private static readonly string[] Header =
         {
-            "Province", "Horizon", "TemperatureFuture", "PrecipitationFuture", "VentFutur",
-            "Humidite", "Pression", "Saison", "WeatherType"
+            "Province", "Date", "Horizon", "TemperatureFuture", "PrecipitationFuture", "VentFutur",
+            "Humidite", "Pression", "Annee", "Mois", "Trimestre", "JourSemaine", "JourAnnee",
+            "JourAnneeSin", "JourAnneeCos", "Saison", "WeatherType"
         };
 
         private readonly MLContext _mlContext;
@@ -109,6 +110,7 @@ namespace MadagascarWeatherML.Datasets
                     rows.Add(new[]
                     {
                         feature.Province,
+                        dateCible.ToString("yyyy-MM-dd", inv),
                         h.ToString(inv),
                         temperaturePredite.ToString(inv),
                         precipitationPredite.ToString(inv),
@@ -118,6 +120,13 @@ namespace MadagascarWeatherML.Datasets
                         // valeurs réelles du jour cible D+h — cohérence stricte entraînement/production.
                         feature.Humidite.ToString(inv),
                         feature.Pression.ToString(inv),
+                        dateCible.Year.ToString(inv),
+                        dateCible.Month.ToString(inv),
+                        (((dateCible.Month - 1) / 3) + 1).ToString(inv),
+                        ToLundiZeroIndex(dateCible.DayOfWeek).ToString(inv),
+                        dateCible.DayOfYear.ToString(inv),
+                        Math.Sin(2 * Math.PI * dateCible.DayOfYear / 365.25).ToString(inv),
+                        Math.Cos(2 * Math.PI * dateCible.DayOfYear / 365.25).ToString(inv),
                         saison,
                         typeReel.ToString()
                     });
@@ -201,6 +210,11 @@ namespace MadagascarWeatherML.Datasets
         {
             bool saisonChaudeEtPluvieuse = mois >= 11 || mois <= 4;
             return saisonChaudeEtPluvieuse ? "SaisonChaudeEtPluvieuse" : "SaisonFraicheEtSeche";
+        }
+
+        private static float ToLundiZeroIndex(DayOfWeek dayOfWeek)
+        {
+            return (int)dayOfWeek == 0 ? 6 : (int)dayOfWeek - 1;
         }
 
         private static bool TryParseDate(string rawDate, out DateTime date)
