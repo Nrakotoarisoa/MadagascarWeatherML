@@ -99,11 +99,20 @@ Le split train/test est chronologique par province : les plus anciennes lignes v
 
 ## Entraînement des modèles
 
-Exécution complète :
+Exécution complète depuis la racine du dépôt :
 
 ```bash
 dotnet run --project MadagascarWeatherML/MadagascarWeatherML.csproj
 ```
+
+Vous pouvez aussi exécuter depuis le dossier projet :
+
+```bash
+cd MadagascarWeatherML
+dotnet run
+```
+
+`Program.cs` résout automatiquement les chemins `data/`, `datasets/` et `Models/` à partir du dossier projet. Cela évite l'erreur `FileNotFoundException: data/antananarivo.csv` lorsque la commande `dotnet run --project ...` est lancée depuis la racine du dépôt.
 
 Séquence logique exécutée par `Program.cs` :
 

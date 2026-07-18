@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using Microsoft.ML;
 using MadagascarWeatherML.Models;
@@ -14,8 +15,9 @@ namespace MadagascarWeatherML
     /// <summary>
     /// Exécute l'intégralité du pipeline décrit dans README.md, section 3 : chargement, nettoyage,
     /// feature engineering, génération des datasets, entraînement des 28 modèles, puis une
-    /// prédiction de démonstration à 7 jours. Chemins relatifs au répertoire d'exécution :
-    /// data/ (entrée), datasets/ (CSV générés), Models/ (28 .zip générés).
+    /// prédiction de démonstration à 7 jours. Les chemins data/, datasets/ et Models/ sont
+    /// résolus à partir du dossier projet pour permettre l'exécution depuis la racine du dépôt
+    /// avec dotnet run --project MadagascarWeatherML/MadagascarWeatherML.csproj.
     /// </summary>
     public static class Program
     {
@@ -26,9 +28,10 @@ namespace MadagascarWeatherML
 
         public static void Main()
         {
-            const string dossierDonnees = "data";
-            const string dossierDatasets = "datasets";
-            const string dossierModeles = "Models";
+            string racineProjet = ResolveProjectRoot();
+            string dossierDonnees = Path.Combine(racineProjet, "data");
+            string dossierDatasets = Path.Combine(racineProjet, "datasets");
+            string dossierModeles = Path.Combine(racineProjet, "Models");
 
             // --- Étapes 1-3 : chargement, nettoyage, feature engineering -----------------------
             Console.WriteLine("=== Étape 1/8 : chargement des CSV Open-Meteo ===");
@@ -37,7 +40,7 @@ namespace MadagascarWeatherML
 
             var cheminsParProvince = Provinces.ToDictionary(
                 p => p,
-                p => System.IO.Path.Combine(dossierDonnees, $"{p.ToLowerInvariant()}.csv"));
+                p => Path.Combine(dossierDonnees, $"{p.ToLowerInvariant()}.csv"));
 
             var brut = loader.LoadMultipleProvincesAsList(cheminsParProvince);
             Console.WriteLine($"  {brut.Count} lignes brutes chargées ({Provinces.Length} provinces).");
@@ -65,15 +68,15 @@ namespace MadagascarWeatherML
 
             AfficherResultatsRegression("Température",
                 new TemperatureTrainer().TrainAll(
-                    System.IO.Path.Combine(dossierDatasets, "TemperatureTraining.csv"), dossierModeles));
+                    Path.Combine(dossierDatasets, "TemperatureTraining.csv"), dossierModeles));
 
             AfficherResultatsRegression("Précipitation",
                 new PrecipitationTrainer().TrainAll(
-                    System.IO.Path.Combine(dossierDatasets, "PrecipitationTraining.csv"), dossierModeles));
+                    Path.Combine(dossierDatasets, "PrecipitationTraining.csv"), dossierModeles));
 
             AfficherResultatsRegression("Vent",
                 new WindTrainer().TrainAll(
-                    System.IO.Path.Combine(dossierDatasets, "WindTraining.csv"), dossierModeles));
+                    Path.Combine(dossierDatasets, "WindTraining.csv"), dossierModeles));
 
             // --- Étape 6 : dataset de classification (dépend des modèles de l'étape 5) --------
             Console.WriteLine("=== Étape 6/8 : génération du dataset de classification ===");
@@ -83,7 +86,7 @@ namespace MadagascarWeatherML
             // --- Étape 7 : entraînement des 7 modèles de classification ------------------------
             Console.WriteLine("=== Étape 7/8 : entraînement des modèles de classification (7 modèles) ===");
             var resultatsClassification = new WeatherTypeTrainer().TrainAll(
-                System.IO.Path.Combine(dossierDatasets, "WeatherTypeTraining.csv"), dossierModeles);
+                Path.Combine(dossierDatasets, "WeatherTypeTraining.csv"), dossierModeles);
 
             foreach (var parHorizon in resultatsClassification.GroupBy(r => r.Horizon).OrderBy(g => g.Key))
             {
@@ -121,6 +124,42 @@ namespace MadagascarWeatherML
             }
 
             Console.WriteLine("=== Terminé ===");
+        }
+
+
+        private static string ResolveProjectRoot()
+        {
+            string currentDirectory = Directory.GetCurrentDirectory();
+
+            foreach (string candidate in EnumerateCandidateRoots(currentDirectory))
+            {
+                if (Directory.Exists(Path.Combine(candidate, "data")))
+                    return candidate;
+
+                string nestedProject = Path.Combine(candidate, "MadagascarWeatherML");
+                if (Directory.Exists(Path.Combine(nestedProject, "data")))
+                    return nestedProject;
+            }
+
+            string baseDirectory = AppContext.BaseDirectory;
+            foreach (string candidate in EnumerateCandidateRoots(baseDirectory))
+            {
+                if (Directory.Exists(Path.Combine(candidate, "data")))
+                    return candidate;
+            }
+
+            return currentDirectory;
+        }
+
+        private static IEnumerable<string> EnumerateCandidateRoots(string startDirectory)
+        {
+            var directory = new DirectoryInfo(startDirectory);
+
+            while (directory != null)
+            {
+                yield return directory.FullName;
+                directory = directory.Parent;
+            }
         }
 
         private static void AfficherResultatsRegression(string cible, List<HorizonTrainingResult> resultats)
