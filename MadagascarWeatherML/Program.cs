@@ -87,7 +87,11 @@ namespace MadagascarWeatherML
 
             foreach (var parHorizon in resultatsClassification.GroupBy(r => r.Horizon).OrderBy(g => g.Key))
             {
-                var meilleur = parHorizon.OrderByDescending(r => r.F1Macro).First();
+                var meilleur = parHorizon
+                    .OrderByDescending(r => r.MacroAccuracy)
+                    .ThenByDescending(r => r.F1Macro)
+                    .ThenBy(r => r.LogLoss)
+                    .First();
                 Console.WriteLine(
                     $"  WeatherType_J{parHorizon.Key} -> {meilleur.Algorithme} " +
                     $"(F1Macro={meilleur.F1Macro:F3}, MacroAcc={meilleur.MacroAccuracy:F3}, " +

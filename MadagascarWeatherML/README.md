@@ -1,153 +1,167 @@
-# Prévision météo Madagascar — Projet ML.NET
+# Prévision météo Madagascar — ML.NET
 
-Système de prévision météo à 7 jours pour les 6 provinces de Madagascar (Antananarivo,
-Fianarantsoa, Toamasina, Mahajanga, Toliara, Antsiranana), basé sur ML.NET et des historiques
-Open-Meteo. Ce document couvre uniquement la partie Machine Learning (aucun backend ASP.NET Core
-n'est inclus dans ce dépôt).
+Projet ML.NET de prévision météo quotidienne à horizon 7 jours pour les provinces de Madagascar :
+Antananarivo, Fianarantsoa, Toamasina, Mahajanga, Toliara et Antsiranana.
 
-## Sommaire
+Pour une province et une date de début, le système produit J+1 à J+7 avec :
 
-1. [Format des données Open-Meteo](#1-format-des-données-open-meteo)
-2. [Ajouter une nouvelle province](#2-ajouter-une-nouvelle-province)
-3. [Ordre d'exécution du pipeline](#3-ordre-dexécution-du-pipeline)
-4. [Entraînement des modèles](#4-entraînement-des-modèles)
-5. [Génération des fichiers .zip](#5-génération-des-fichiers-zip)
-6. [Prédiction sur 7 jours](#6-prédiction-sur-7-jours)
-7. [Réentraînement avec de nouvelles données](#7-réentraînement-avec-de-nouvelles-données)
-8. [Corrections apportées lors de l'audit](#8-corrections-apportées-lors-de-laudit)
+- température moyenne prévue (°C) ;
+- précipitations prévues (mm) ;
+- vitesse du vent prévue (km/h) ;
+- type de météo ;
+- score de confiance du classifieur.
+
+Les données d’entrée sont des historiques CSV Open-Meteo, une ligne par jour et par province.
 
 ---
 
-## 1. Format des données Open-Meteo
+## Architecture ML
 
-Chaque province dispose de son propre fichier CSV historique (un export Open-Meteo par
-coordonnées lat/lon du chef-lieu de province). `OpenMeteoCsvLoader` attend, **avec en-tête**, les
-colonnes suivantes, dans cet ordre exact :
+Le pipeline est volontairement séquentiel pour éviter les fuites de données et conserver une cohérence stricte entre entraînement et production.
 
-| # | Colonne         | Type   | Exemple      |
-|---|------------------|--------|--------------|
-| 0 | date             | string | 2024-03-15   |
-| 1 | latitude         | float  | -18.8792     |
-| 2 | longitude        | float  | 47.5079      |
-| 3 | temperature_moyenne | float | 24.3      |
-| 4 | temperature_min  | float  | 18.1         |
-| 5 | temperature_max  | float  | 29.6         |
-| 6 | humidite         | float  | 78.0 (%)     |
-| 7 | pression         | float  | 1012.5 (hPa) |
-| 8 | precipitation    | float  | 12.4 (mm)    |
-| 9 | vitesse_vent     | float  | 14.2 (km/h)  |
-| 10| direction_vent   | float  | 210.0 (°)    |
-| 11| code_meteo       | float  | 61 (code WMO)|
+1. `OpenMeteoCsvLoader` charge les fichiers CSV par province.
+2. `DataCleaner` filtre les lignes invalides, doublons et mesures aberrantes, puis trie par province/date.
+3. `WeatherFeatureEngineer` produit les features temporelles, lags, moyennes/cumuls glissants et climatologies sans utiliser le futur.
+4. `NumericForecastDatasetBuilder` construit trois datasets de régression multi-horizon : température, précipitations et vent.
+5. `TemperatureTrainer`, `PrecipitationTrainer` et `WindTrainer` entraînent 21 modèles de régression (`J1` à `J7` pour chaque cible).
+6. `WeatherTypeDatasetBuilder` génère `WeatherTypeTraining.csv` en scorant les 21 modèles de régression déjà entraînés sur l’historique : le classifieur apprend donc sur des valeurs prédites, comme en production.
+7. `WeatherTypeTrainer` entraîne 7 classifieurs WeatherType distincts.
+8. `WeatherForecastEngine` charge les modèles à la demande, les met en cache et retourne les prévisions chronologiques.
 
-Le champ **Province n'est volontairement pas dans le CSV** (les exports Open-Meteo bruts n'ont pas
-cette notion) : il est injecté par `OpenMeteoCsvLoader` à partir du dictionnaire fourni en entrée
-(nom de province → chemin du fichier). `code_meteo` est le code WMO standard (0 = ciel clair,
-61/63/65 = pluie, 95/96/99 = orage, 45/48 = brouillard, etc.) — voir le mapping complet dans
-`WeatherTypeDatasetBuilder.MapCodeMeteoToWeatherType`.
+---
 
-Une ligne manquante, mal formée, ou avec une valeur non numérique est marquée `NaN` par le loader
-puis éliminée par `DataCleaner` (jamais silencieusement corrigée).
+## Structure des dossiers
 
-## 2. Ajouter une nouvelle province
-
-1. **Obtenir l'historique Open-Meteo** de la nouvelle province (même format que ci-dessus), sur la
-   plus longue période disponible.
-2. **Ajouter une entrée** dans le dictionnaire passé à `OpenMeteoCsvLoader.LoadMultipleProvincesAsList`,
-   par ex. `{ "Itasy", "data/itasy.csv" }`.
-3. **Ajouter le nom de la province** à la liste `ProvincesValides` dans `WeatherForecastEngine.cs`
-   (sinon `Predict` la rejettera).
-4. *(Optionnel)* Ajouter son altitude dans le dictionnaire `provinceAltitudes` transmis à
-   `WeatherFeatureEngineer.BuildFeatures`.
-5. **Relancer tout le pipeline** (section 3) : `Province` est une feature catégorielle apprise par
-   One-Hot Encoding, donc les 28 modèles doivent être réentraînés pour "connaître" la nouvelle
-   province — il n'existe pas de mécanisme d'ajout incrémental d'une catégorie à un modèle déjà
-   entraîné en ML.NET.
-6. Vérifier qu'il y a **au moins ~30 jours d'historique continu** pour la nouvelle province avant
-   de lancer une prédiction (7 jours minimum pour les lags, plus une marge pour la climatologie).
-
-## 3. Ordre d'exécution du pipeline
-
-Point important corrigé lors de l'audit : **`WeatherTypeTraining.csv` dépend désormais des 21
-modèles de régression déjà entraînés** (voir section 8). L'ordre d'exécution n'est donc plus
-librement parallélisable et doit respecter :
-
-```
-1. OpenMeteoCsvLoader.LoadMultipleProvincesAsList(...)         -> List<WeatherRawData> (brut)
-2. DataCleaner.Clean(...)                                       -> List<WeatherRawData> (nettoyé, trié)
-3. WeatherFeatureEngineer.BuildFeatures(...)                     -> List<WeatherFeature>
-4. MLDatasetGenerator.GenerateNumericDatasets(...)               -> Temperature/Precipitation/WindTraining.csv
-5. TemperatureTrainer.TrainAll(...)                              -> Models/Temperature_J1..J7.zip
-   PrecipitationTrainer.TrainAll(...)                            -> Models/Precipitation_J1..J7.zip
-   WindTrainer.TrainAll(...)                                     -> Models/Wind_J1..J7.zip
-6. MLDatasetGenerator.GenerateWeatherTypeDataset(...)            -> WeatherTypeTraining.csv
-   (nécessite les 21 modèles de l'étape 5 : ils sont scorés sur l'historique)
-7. WeatherTypeTrainer.TrainAll(...)                              -> Models/WeatherType_J1..J7.zip
-8. new WeatherForecastEngine(modelsDirectory, cleanedData).Predict(...)
+```text
+MadagascarWeatherML/
+├── DataPreparation/      # chargement, nettoyage, feature engineering
+├── Datasets/             # génération des CSV d'entraînement
+├── Inference/            # moteur de prédiction 7 jours
+├── Models/               # DTO ML.NET et résultats métier + modèles .zip générés
+├── Training/             # trainers régression et classification
+├── data/                 # CSV Open-Meteo historiques d'entrée
+├── datasets/             # CSV d'entraînement générés
+├── Program.cs            # orchestration complète du pipeline
+└── MadagascarWeatherML.csproj
 ```
 
-## 4. Entraînement des modèles
+---
+
+## Format des données Open-Meteo
+
+Le loader accepte deux formats :
+
+1. l’ancien format applicatif avec une première ligne d’en-tête `date,latitude,longitude,...` ;
+2. l’export quotidien brut Open-Meteo présent dans `data/`, avec des lignes de métadonnées puis une ligne d’en-tête commençant par `time`.
+
+Format applicatif complet :
+
+| # | Colonne | Type | Description |
+|---|---|---|---|
+| 0 | `date` | string | date ISO `yyyy-MM-dd` |
+| 1 | `latitude` | float | latitude du point Open-Meteo |
+| 2 | `longitude` | float | longitude du point Open-Meteo |
+| 3 | `temperature_moyenne` | float | température moyenne quotidienne |
+| 4 | `temperature_min` | float | température minimale |
+| 5 | `temperature_max` | float | température maximale |
+| 6 | `humidite` | float | humidité relative |
+| 7 | `pression` | float | pression atmosphérique |
+| 8 | `precipitation` | float | précipitations quotidiennes |
+| 9 | `vitesse_vent` | float | vitesse du vent |
+| 10 | `direction_vent` | float | direction du vent |
+| 11 | `code_meteo` | float | code WMO Open-Meteo |
+
+Pour les exports quotidiens Open-Meteo bruts, le loader mappe notamment `time`, `temperature_2m_min`, `temperature_2m_max`, `weather_code`, `precipitation_sum`, `wind_speed_10m_max` et `wind_direction_10m_dominant`. Si l’export ne contient pas humidité/pression, des valeurs de repli neutres (`75%`, `1013.25 hPa`) sont utilisées afin de conserver l’historique ; pour une qualité supérieure, exportez aussi ces variables depuis Open-Meteo.
+
+La province n’est pas lue depuis le CSV : elle est injectée par le dictionnaire `province -> chemin` fourni au loader.
+
+---
+
+## Features et prévention du data leakage
+
+Les features numériques de régression utilisent uniquement l’état disponible au jour de référence `D` ou avant :
+
+- lags température : `TempLag1`, `TempLag2`, `TempLag3`, `TempLag7` ;
+- moyenne et écart-type glissants température sur les 7 jours passés ;
+- lags vent : `VentLag1`, `VentLag3` ;
+- moyenne glissante vent sur les 7 jours passés ;
+- lags précipitations : `PrecipLag1`, `PrecipLag3` ;
+- cumul pluie sur les 7 jours passés ;
+- climatologies calculées uniquement avec les années strictement antérieures à la date courante ;
+- variables calendaires : année, mois, trimestre, jour semaine, jour année, sinus/cosinus annuels, saison malgache ;
+- province encodée en one-hot.
+
+Les labels `J+1` à `J+7` sont récupérés par couple exact `(Province, Date cible)`. Si une date future manque, la ligne est rejetée au lieu d’être interpolée.
+
+Le split train/test est chronologique par province : les plus anciennes lignes vont à l’entraînement, les plus récentes au test. Aucun split aléatoire n’est utilisé.
+
+---
+
+## Entraînement des modèles
+
+Exécution complète :
+
+```bash
+dotnet run --project MadagascarWeatherML/MadagascarWeatherML.csproj
+```
+
+Séquence logique exécutée par `Program.cs` :
 
 ```csharp
 var mlContext = new MLContext(seed: 2026);
-
 var loader = new OpenMeteoCsvLoader(mlContext);
-var brut = loader.LoadMultipleProvincesAsList(new Dictionary<string, string>
-{
-    ["Antananarivo"]  = "data/antananarivo.csv",
-    ["Fianarantsoa"] = "data/fianarantsoa.csv",
-    ["Toamasina"]   = "data/toamasina.csv",
-    ["Mahajanga"]   = "data/mahajanga.csv",
-    ["Toliara"]     = "data/toliara.csv",
-    ["Antsiranana"] = "data/antsiranana.csv",
-});
+var brut = loader.LoadMultipleProvincesAsList(cheminsParProvince);
 
-var cleaner = new DataCleaner();
-var propre = cleaner.Clean(brut, out var rapportNettoyage);
-
+var propre = new DataCleaner().Clean(brut, out var rapportNettoyage);
 var features = new WeatherFeatureEngineer().BuildFeatures(propre);
 
 var generateur = new MLDatasetGenerator();
-generateur.GenerateNumericDatasets(propre, features, "datasets/");
+generateur.GenerateNumericDatasets(propre, features, "datasets");
 
-// Étape 5 : régressions (chacune teste LightGbm / FastTree / FastForest et choisit automatiquement)
-new TemperatureTrainer().TrainAll("datasets/TemperatureTraining.csv", "Models/");
-new PrecipitationTrainer().TrainAll("datasets/PrecipitationTraining.csv", "Models/");
-new WindTrainer().TrainAll("datasets/WindTraining.csv", "Models/");
+new TemperatureTrainer().TrainAll("datasets/TemperatureTraining.csv", "Models");
+new PrecipitationTrainer().TrainAll("datasets/PrecipitationTraining.csv", "Models");
+new WindTrainer().TrainAll("datasets/WindTraining.csv", "Models");
 
-// Étape 6 : dataset du classifieur, généré à partir des modèles de régression ci-dessus
-generateur.GenerateWeatherTypeDataset(propre, features, regressionModelsDirectory: "Models/", outputDirectory: "datasets/");
-
-// Étape 7 : classification (teste LightGbm / SdcaMaximumEntropy / FastTree OneVersusAll)
-new WeatherTypeTrainer().TrainAll("datasets/WeatherTypeTraining.csv", "Models/");
+generateur.GenerateWeatherTypeDataset(propre, features, "Models", "datasets", mlContext);
+new WeatherTypeTrainer().TrainAll("datasets/WeatherTypeTraining.csv", "Models");
 ```
 
-Chaque `TrainAll` retourne la liste des métriques comparées par algorithme et par horizon
-(`HorizonTrainingResult` pour les régressions, `ClassificationEvaluationResult` pour la
-classification) — utile à consigner dans un rapport académique.
+Les modèles de régression testent LightGbm, FastTree et FastForest. Le meilleur modèle est sélectionné par RMSE minimal, puis réentraîné sur tout le dataset disponible de l’horizon.
 
-## 5. Génération des fichiers .zip
+Les modèles WeatherType testent LightGbmMulticlass, SdcaMaximumEntropy et FastTree via OneVersusAll. Le meilleur modèle est sélectionné automatiquement selon :
 
-À l'issue de l'étape 4, `Models/` contient 28 fichiers :
+1. `MacroAccuracy` la plus élevée ;
+2. `F1 Macro` le plus élevé en cas d’égalité ;
+3. `LogLoss` la plus faible en cas de nouvelle égalité.
 
+---
+
+## Fichiers générés
+
+Après entraînement, `Models/` contient 28 fichiers `.zip` :
+
+```text
+Temperature_J1.zip   ... Temperature_J7.zip
+Precipitation_J1.zip ... Precipitation_J7.zip
+Wind_J1.zip          ... Wind_J7.zip
+WeatherType_J1.zip   ... WeatherType_J7.zip
 ```
-Models/
-├── Temperature_J1.zip   ... Temperature_J7.zip
-├── Precipitation_J1.zip ... Precipitation_J7.zip
-├── Wind_J1.zip          ... Wind_J7.zip
-└── WeatherType_J1.zip   ... WeatherType_J7.zip
-```
 
-Les 21 modèles de régression sont réellement distincts (un par horizon, chacun réentraîné sur
-l'intégralité des données après sélection automatique du meilleur algorithme). Les 7 modèles de
-classification sont **également réellement distincts entre eux** depuis la correction de l'audit
-(section 8) — contrairement à une version précédente qui dupliquait un modèle unique.
+Les datasets générés dans `datasets/` sont :
 
-## 6. Prédiction sur 7 jours
+- `TemperatureTraining.csv` ;
+- `PrecipitationTraining.csv` ;
+- `WindTraining.csv` ;
+- `WeatherTypeTraining.csv`.
+
+`WeatherTypeTraining.csv` contient la date cible, l’horizon, les sorties prévues par les modèles de régression, humidité/pression persistées depuis `D`, la province et les variables temporelles de la date cible.
+
+---
+
+## Exécution d’une prédiction 7 jours
 
 ```csharp
-var propre = /* DataCleaner.Clean(...), déjà fait une fois */;
-
-var moteur = new WeatherForecastEngine(modelsDirectory: "Models/", cleanedHistoricalData: propre);
+var moteur = new WeatherForecastEngine("Models", propre);
 
 List<WeatherForecastResult> previsions = moteur.Predict(
     province: "Antananarivo",
@@ -155,74 +169,98 @@ List<WeatherForecastResult> previsions = moteur.Predict(
     days: 7);
 ```
 
-Retourne une liste de `WeatherForecastResult` (une entrée par jour) :
+Le moteur utilise `startDate - 1` comme date de référence historique `D`, puis applique les modèles `J1` à `J7`. Les résultats sont retournés dans l’ordre chronologique.
+
+Exemple de sortie :
 
 ```json
-[
-  {
-    "date": "2026-10-01",
-    "province": "Antananarivo",
-    "temperature": 25.4,
-    "precipitation": 8.2,
-    "windSpeed": 18,
-    "weatherType": "Pluvieux",
-    "confidence": 0.87
-  }
-]
+{
+  "date": "2026-10-01",
+  "province": "Antananarivo",
+  "temperature": 25.4,
+  "precipitation": 8.2,
+  "windSpeed": 18,
+  "weatherType": "Pluvieux",
+  "confidence": 0.87
+}
 ```
 
-`WeatherForecastEngine` doit disposer d'au moins 7 jours d'historique continu avant `startDate`
-pour la province demandée (sinon `InvalidOperationException`). Une instance peut servir plusieurs
-appels `Predict` (elle met en cache les modèles chargés) ; voir la note de thread-safety dans le
-code pour un usage en API.
+---
 
-## 7. Réentraînement avec de nouvelles données
+## Métriques d’évaluation
 
-Aucune classe de ce projet ne conserve d'état entre deux exécutions : réentraîner avec de
-nouvelles données consiste simplement à **rejouer le pipeline de la section 3 avec un historique
-mis à jour**, dans le même ordre :
+### Régression
 
-1. Ajouter les nouvelles lignes aux CSV Open-Meteo (ou fournir des fichiers mis à jour).
-2. Relancer les étapes 1 à 3 (chargement, nettoyage, feature engineering).
-3. Relancer l'étape 4 (régénère les 3 CSV de régression avec l'historique complet).
-4. Relancer l'étape 5 : `TrainAll` **écrase** les `.zip` existants avec les nouveaux modèles.
-5. Relancer l'étape 6 (le CSV du classifieur doit être régénéré avec les *nouvelles* sorties de
-   régression — ne pas réutiliser un ancien `WeatherTypeTraining.csv`).
-6. Relancer l'étape 7.
+Chaque horizon de température, précipitations et vent expose :
 
-Il n'y a pas de réentraînement incrémental (fine-tuning) : chaque appel à `TrainAll` réentraîne
-entièrement depuis le CSV fourni. C'est volontaire — les trainers ML.NET utilisés (LightGbm,
-FastTree, FastForest, SdcaMaximumEntropy) ne supportent pas l'apprentissage incrémental, et un
-réentraînement complet reste peu coûteux à l'échelle de ce projet (6 provinces, prévisions
-journalières).
+- RMSE ;
+- MAE ;
+- R² ;
+- comparaison des algorithmes candidats.
 
-## 8. Corrections apportées lors de l'audit
+### Classification WeatherType
 
-| # | Problème identifié | Correction |
-|---|---|---|
-| 1 | Fichier fantôme `TrainingDatasetRows.cs` dupliquant des classes déjà définies (namespace `Models` au lieu de `Training`), non référencé nulle part. | Supprimé. |
-| 2 | **Fuite de distribution majeure** : `WeatherTypeTraining.csv` utilisait les valeurs météo réellement observées comme "valeurs futures", alors qu'en production le classifieur reçoit les sorties (imparfaites) des modèles de régression. Le classifieur apprenait donc sur des données plus propres que celles qu'il reçoit réellement en production. | `WeatherTypeDatasetBuilder` charge désormais les 21 modèles de régression déjà entraînés et les score sur l'historique pour produire les features d'entraînement — exactement ce que fait `WeatherForecastEngine` en production. |
-| 3 | Conséquence directe du point 2 : le bruit de prédiction dépend de l'horizon (J+7 plus incertain que J+1), donc un classifieur unique dupliqué 7 fois n'était plus justifié. | `WeatherTypeTraining.csv` inclut désormais une colonne `Horizon` ; `WeatherTypeTrainer` entraîne 7 modèles réellement distincts (filtrage via `FilterRowsByColumn`). |
-| 4 | Incohérence Humidité/Pression : l'ancienne version utilisait les valeurs réelles du jour cible D+h, jamais disponibles en production. | Aligné sur le jour de référence D (persistance), identique à `WeatherForecastEngine`. |
-| 5 | `WeatherFeature.cs` contenait des champs `Horizon`/`Label*` vestiges de la toute première architecture (modèle unique multi-horizon), jamais renseignés ni lus par le pipeline réellement implémenté. | Supprimés. |
-| 6 | `WeatherTypePredictionResult` (Models) déclarait `PredictedLabel` comme clé `uint` (`KeyType`), alors que le pipeline sauvegardé reconvertit déjà la clé en texte (`MapKeyToValue`). | Corrigé en `string`, aligné sur `WeatherTypeScoringOutput` réellement utilisé par le moteur d'inférence. |
-| 7 | Incohérence de nommage de province dans les commentaires (`Antananarivo` dans `WeatherRawData.cs`/`OpenMeteoCsvLoader.cs` vs `Antananarivo` dans `WeatherForecastEngine.cs`, qui fait foi car c'est la validation réellement exécutée). | Harmonisé sur `Antananarivo` partout. |
-| 8 | `MLDatasetGenerator.GenerateAllDatasets` masquait la nouvelle dépendance d'ordre (point 2) en générant les 4 CSV en un seul appel. | Scindé en `GenerateNumericDatasets` (aucune dépendance) et `GenerateWeatherTypeDataset` (nécessite les modèles de régression), avec la séquence documentée en section 3. |
+Chaque horizon expose :
 
-Points vérifiés sans anomalie détectée :
+- MacroAccuracy ;
+- MicroAccuracy ;
+- F1 Macro calculé depuis la matrice de confusion ;
+- LogLoss ;
+- matrice de confusion formatée.
 
-- **Compilation** : namespaces cohérents (`Models`, `DataPreparation`, `Datasets`, `Training`,
-  `Inference`), pas de référence à un type ou une propriété inexistante après corrections.
-- **Cohérence features entraînement/prédiction** : les `ColumnName` de `WeatherFeature` (Models)
-  et `CommonWeatherFeatureRow` (Training) correspondent exactement (27 colonnes), ce qui permet
-  d'utiliser `WeatherFeature` directement comme entrée des `PredictionEngine` de régression sans
-  classe dupliquée.
-- **Absence de fuite temporelle** : recherche des labels futurs par date calendaire exacte
-  (jamais par décalage d'index), climatologie calculée uniquement sur les années strictement
-  antérieures, split train/test chronologique par province (jamais aléatoire).
-- **Performance** : les `PredictionEngine` sont mis en cache par horizon (pas de rechargement de
-  modèle à chaque prédiction) ; volumétrie (6 provinces, séries journalières) largement dans les
-  capacités de ML.NET sans optimisation particulière. Point d'attention documenté : plusieurs
-  classes créent chacune leur propre `MLContext` — sans impact fonctionnel à cette échelle, mais
-  un `MLContext` partagé (paramètre optionnel déjà présent sur `WeatherTypeDatasetBuilder` et
-  `MLDatasetGenerator.GenerateWeatherTypeDataset`) est préférable si le projet grandit.
+---
+
+## Réentraînement avec de nouvelles données
+
+1. Ajouter ou remplacer les CSV Open-Meteo dans `data/`.
+2. Relancer tout le pipeline dans l’ordre complet.
+3. Ne pas réutiliser un ancien `WeatherTypeTraining.csv` après réentraînement des régressions : il dépend des sorties des modèles de régression courants.
+4. Remplacer les `.zip` en production uniquement après validation des métriques.
+5. Conserver un rapport d’entraînement par date de réentraînement pour tracer les métriques et les algorithmes retenus.
+
+---
+
+## Maintenance
+
+- Vérifier régulièrement que les CSV restent chronologiques et sans trous importants.
+- Surveiller les métriques par province et par horizon : J+7 doit naturellement être moins précis que J+1.
+- Réentraîner si la distribution des données change fortement (nouvel historique, changement de source Open-Meteo, ajout de province).
+- Pour une API ASP.NET Core, préférer `PredictionEnginePool` plutôt qu’un singleton partagé, car `PredictionEngine` n’est pas thread-safe.
+- Garder les packages ML.NET cohérents entre eux (`Microsoft.ML`, `Microsoft.ML.FastTree`, `Microsoft.ML.LightGbm`).
+
+---
+
+## Rapport d’audit final
+
+### Problèmes détectés
+
+- Le loader ne prenait pas correctement en charge les exports Open-Meteo quotidiens bruts présents dans `data/`.
+- Le classifieur WeatherType ne recevait pas explicitement les variables temporelles complètes demandées.
+- `WeatherTypeTraining.csv` ne contenait pas la date cible, ce qui rendait le contrôle chronologique moins robuste.
+- La sélection automatique du meilleur classifieur utilisait F1 Macro comme critère principal au lieu de MacroAccuracy puis F1 Macro puis LogLoss.
+- Le programme de démonstration affichait le meilleur classifieur selon l’ancien critère.
+- La documentation ne couvrait pas assez précisément les métriques, la maintenance et la structure ML complète.
+
+### Corrections effectuées
+
+- Loader rendu compatible avec les exports Open-Meteo quotidiens bruts et l’ancien format applicatif.
+- Ajout de la date cible et des variables calendaires dans `WeatherTypeTraining.csv`.
+- Ajout des mêmes variables calendaires dans l’entrée de scoring WeatherType du moteur d’inférence.
+- Split WeatherType trié explicitement par date à l’intérieur de chaque province.
+- Sélection du classifieur alignée sur les critères demandés : MacroAccuracy, F1 Macro, LogLoss.
+- Conservation de la matrice de confusion formatée dans le résultat d’évaluation classification.
+- README complété pour décrire l’architecture, les datasets, l’entraînement, les `.zip`, la prédiction, les métriques et la maintenance.
+
+### Optimisations appliquées
+
+- Pas de changement architectural inutile.
+- Réutilisation des caches de `PredictionEngine` déjà présents.
+- Alignement entraînement/production du classifieur sans duplication de pipeline.
+- Contrôle chronologique WeatherType rendu explicite via la date cible.
+
+### Points restant à améliorer
+
+- Installer le SDK .NET dans l’environnement d’exécution CI pour compiler et exécuter le pipeline automatiquement.
+- Ajouter des tests unitaires sur le tri chronologique, les lags et la génération des horizons.
+- Ajouter un export persistant des rapports de métriques en JSON/CSV.
+- En production web, remplacer les `PredictionEngine` cachés par `PredictionEnginePool`.
