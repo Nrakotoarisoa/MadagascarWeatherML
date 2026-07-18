@@ -28,7 +28,7 @@ namespace MadagascarWeatherML.DataPreparation
         /// après nettoyage, via DataCleaner puis WeatherFeatureEngineer).
         /// </summary>
         /// <param name="provinceFilePaths">
-        /// Dictionnaire associant le nom de chaque province malgache (Analamanga, Fianarantsoa,
+        /// Dictionnaire associant le nom de chaque province malgache (Antananarivo, Fianarantsoa,
         /// Toamasina, Mahajanga, Toliara, Antsiranana) au chemin de son fichier CSV Open-Meteo.
         /// </param>
         public IDataView LoadMultipleProvinces(IDictionary<string, string> provinceFilePaths)

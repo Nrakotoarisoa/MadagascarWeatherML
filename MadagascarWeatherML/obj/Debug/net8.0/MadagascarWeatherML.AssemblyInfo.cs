@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MadagascarWeatherML")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5a94fd397600ec4a3ce5647ed2299b6e862b6d37")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+19d4a1206655530658897ab69e225552162e5822")]
 [assembly: System.Reflection.AssemblyProductAttribute("MadagascarWeatherML")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MadagascarWeatherML")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

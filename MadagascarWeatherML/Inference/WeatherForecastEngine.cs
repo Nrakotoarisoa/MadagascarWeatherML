@@ -53,7 +53,7 @@ namespace MadagascarWeatherML.Inference
     ///
     /// Utilisation typique dans un contrôleur ASP.NET Core :
     /// <code>
-    /// var resultats = _weatherForecastEngine.Predict(province: "Analamanga", startDate: "2026-10-01", days: 7);
+    /// var resultats = _weatherForecastEngine.Predict(province: "Antananarivo", startDate: "2026-10-01", days: 7);
     /// return Ok(resultats);
     /// </code>
     ///
@@ -70,7 +70,7 @@ namespace MadagascarWeatherML.Inference
 
         private static readonly string[] ProvincesValides =
         {
-            "Analamanga", "Fianarantsoa", "Toamasina", "Mahajanga", "Toliara", "Antsiranana"
+            "Antananarivo", "Fianarantsoa", "Toamasina", "Mahajanga", "Toliara", "Antsiranana"
         };
 
         private readonly MLContext _mlContext;
@@ -114,7 +114,7 @@ namespace MadagascarWeatherML.Inference
         /// Génère la prévision météo pour une province, à partir d'une date de début, sur un
         /// nombre de jours donné (1 à 7 inclus).
         /// </summary>
-        /// <example>Predict(province: "Analamanga", startDate: "2026-10-01", days: 7)</example>
+        /// <example>Predict(province: "Antananarivo", startDate: "2026-10-01", days: 7)</example>
         public List<WeatherForecastResult> Predict(string province, string startDate, int days)
         {
             if (string.IsNullOrWhiteSpace(province) || !ProvincesValides.Contains(province, StringComparer.OrdinalIgnoreCase))

@@ -1,6 +1,6 @@
 # Prévision météo Madagascar — Projet ML.NET
 
-Système de prévision météo à 7 jours pour les 6 provinces de Madagascar (Analamanga,
+Système de prévision météo à 7 jours pour les 6 provinces de Madagascar (Antananarivo,
 Fianarantsoa, Toamasina, Mahajanga, Toliara, Antsiranana), basé sur ML.NET et des historiques
 Open-Meteo. Ce document couvre uniquement la partie Machine Learning (aucun backend ASP.NET Core
 n'est inclus dans ce dépôt).
@@ -93,7 +93,7 @@ var mlContext = new MLContext(seed: 2026);
 var loader = new OpenMeteoCsvLoader(mlContext);
 var brut = loader.LoadMultipleProvincesAsList(new Dictionary<string, string>
 {
-    ["Analamanga"]  = "data/analamanga.csv",
+    ["Antananarivo"]  = "data/antananarivo.csv",
     ["Fianarantsoa"] = "data/fianarantsoa.csv",
     ["Toamasina"]   = "data/toamasina.csv",
     ["Mahajanga"]   = "data/mahajanga.csv",
@@ -150,7 +150,7 @@ var propre = /* DataCleaner.Clean(...), déjà fait une fois */;
 var moteur = new WeatherForecastEngine(modelsDirectory: "Models/", cleanedHistoricalData: propre);
 
 List<WeatherForecastResult> previsions = moteur.Predict(
-    province: "Analamanga",
+    province: "Antananarivo",
     startDate: "2026-10-01",
     days: 7);
 ```
@@ -161,7 +161,7 @@ Retourne une liste de `WeatherForecastResult` (une entrée par jour) :
 [
   {
     "date": "2026-10-01",
-    "province": "Analamanga",
+    "province": "Antananarivo",
     "temperature": 25.4,
     "precipitation": 8.2,
     "windSpeed": 18,
@@ -206,7 +206,7 @@ journalières).
 | 4 | Incohérence Humidité/Pression : l'ancienne version utilisait les valeurs réelles du jour cible D+h, jamais disponibles en production. | Aligné sur le jour de référence D (persistance), identique à `WeatherForecastEngine`. |
 | 5 | `WeatherFeature.cs` contenait des champs `Horizon`/`Label*` vestiges de la toute première architecture (modèle unique multi-horizon), jamais renseignés ni lus par le pipeline réellement implémenté. | Supprimés. |
 | 6 | `WeatherTypePredictionResult` (Models) déclarait `PredictedLabel` comme clé `uint` (`KeyType`), alors que le pipeline sauvegardé reconvertit déjà la clé en texte (`MapKeyToValue`). | Corrigé en `string`, aligné sur `WeatherTypeScoringOutput` réellement utilisé par le moteur d'inférence. |
-| 7 | Incohérence de nommage de province dans les commentaires (`Antananarivo` dans `WeatherRawData.cs`/`OpenMeteoCsvLoader.cs` vs `Analamanga` dans `WeatherForecastEngine.cs`, qui fait foi car c'est la validation réellement exécutée). | Harmonisé sur `Analamanga` partout. |
+| 7 | Incohérence de nommage de province dans les commentaires (`Antananarivo` dans `WeatherRawData.cs`/`OpenMeteoCsvLoader.cs` vs `Antananarivo` dans `WeatherForecastEngine.cs`, qui fait foi car c'est la validation réellement exécutée). | Harmonisé sur `Antananarivo` partout. |
 | 8 | `MLDatasetGenerator.GenerateAllDatasets` masquait la nouvelle dépendance d'ordre (point 2) en générant les 4 CSV en un seul appel. | Scindé en `GenerateNumericDatasets` (aucune dépendance) et `GenerateWeatherTypeDataset` (nécessite les modèles de régression), avec la séquence documentée en section 3. |
 
 Points vérifiés sans anomalie détectée :

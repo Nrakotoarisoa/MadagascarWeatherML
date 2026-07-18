@@ -21,7 +21,7 @@ namespace MadagascarWeatherML
     {
         private static readonly string[] Provinces =
         {
-            "Analamanga", "Fianarantsoa", "Toamasina", "Mahajanga", "Toliara", "Antsiranana"
+            "Antananarivo", "Fianarantsoa", "Toamasina", "Mahajanga", "Toliara", "Antsiranana"
         };
 
         public static void Main()
@@ -97,7 +97,7 @@ namespace MadagascarWeatherML
             // --- Étape 8 : prédiction de démonstration à 7 jours -------------------------------
             Console.WriteLine("=== Étape 8/8 : prédiction de démonstration ===");
 
-            string province = "Analamanga";
+            string province = "Antananarivo";
             DateTime dernierJourConnu = propre
                 .Where(r => r.Province == province)
                 .Select(r => DateTime.ParseExact(r.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture))
