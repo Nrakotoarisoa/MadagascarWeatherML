@@ -43,6 +43,11 @@ namespace MadagascarWeatherML.Inference
         [ColumnName("JourAnneeSin")] public float JourAnneeSin { get; set; }
         [ColumnName("JourAnneeCos")] public float JourAnneeCos { get; set; }
         [ColumnName("Saison")] public string Saison { get; set; }
+
+        // Colonne requise par le transform MapValueToKey("Label", "WeatherType") sauvegardé
+        // dans le pipeline d'entraînement. Elle n'est pas utilisée par le trainer au scoring,
+        // mais ML.NET exige que la colonne source existe pour construire le PredictionEngine.
+        [ColumnName("WeatherType")] public string WeatherType { get; set; }
     }
 
     /// <summary>Sortie brute du modèle de classification (le pipeline sauvegardé reconvertit déjà la clé en texte via MapKeyToValue).</summary>
@@ -226,7 +231,8 @@ namespace MadagascarWeatherML.Inference
                 JourAnnee = dateCible.DayOfYear,
                 JourAnneeSin = (float)Math.Sin(2 * Math.PI * dateCible.DayOfYear / 365.25),
                 JourAnneeCos = (float)Math.Cos(2 * Math.PI * dateCible.DayOfYear / 365.25),
-                Saison = ResoudreSaisonMalgache(dateCible.Month)
+                Saison = ResoudreSaisonMalgache(dateCible.Month),
+                WeatherType = MadagascarWeatherML.Models.WeatherType.Autre.ToString()
             };
 
             if (!_weatherTypeEngines.TryGetValue(horizon, out var moteur))

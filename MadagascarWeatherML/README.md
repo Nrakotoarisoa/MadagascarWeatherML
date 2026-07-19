@@ -279,3 +279,7 @@ Chaque horizon expose :
 ### `ArgumentOutOfRangeException: Must be less than lowerBound (Parameter 'upperBound')`
 
 Cette erreur venait du filtrage des lignes WeatherType par horizon avec une plage dégénérée `lowerBound == upperBound` dans `FilterRowsByColumn`. ML.NET exige une borne supérieure strictement supérieure à la borne inférieure. Le filtrage utilise désormais une plage autour de l'entier d'horizon (`h - 0.5` à `h + 0.5`) afin de sélectionner uniquement les lignes `Horizon = h` sans déclencher l'exception.
+
+### `Could not find input column 'WeatherType'`
+
+Cette erreur peut survenir en prédiction si le modèle WeatherType sauvegardé contient encore le transform de label `MapValueToKey("Label", "WeatherType")`. Même si le label n'est pas utilisé pour scorer, ML.NET exige que la colonne source existe quand il construit le `PredictionEngine`. L'entrée de scoring fournit donc une valeur factice `WeatherType = "Autre"`; elle ne sert pas à la prédiction mais satisfait le schéma attendu par la chaîne de transforms.
