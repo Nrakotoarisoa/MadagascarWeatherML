@@ -35,7 +35,19 @@ namespace MadagascarWeatherML.Inference
         [ColumnName("VentFutur")] public float VentFutur { get; set; }
         [ColumnName("Humidite")] public float Humidite { get; set; }
         [ColumnName("Pression")] public float Pression { get; set; }
+        [ColumnName("Annee")] public float Annee { get; set; }
+        [ColumnName("Mois")] public float Mois { get; set; }
+        [ColumnName("Trimestre")] public float Trimestre { get; set; }
+        [ColumnName("JourSemaine")] public float JourSemaine { get; set; }
+        [ColumnName("JourAnnee")] public float JourAnnee { get; set; }
+        [ColumnName("JourAnneeSin")] public float JourAnneeSin { get; set; }
+        [ColumnName("JourAnneeCos")] public float JourAnneeCos { get; set; }
         [ColumnName("Saison")] public string Saison { get; set; }
+
+        // Colonne requise par le transform MapValueToKey("Label", "WeatherType") sauvegardé
+        // dans le pipeline d'entraînement. Elle n'est pas utilisée par le trainer au scoring,
+        // mais ML.NET exige que la colonne source existe pour construire le PredictionEngine.
+        [ColumnName("WeatherType")] public string WeatherType { get; set; }
     }
 
     /// <summary>Sortie brute du modèle de classification (le pipeline sauvegardé reconvertit déjà la clé en texte via MapKeyToValue).</summary>
@@ -212,7 +224,15 @@ namespace MadagascarWeatherML.Inference
                 // la date cible plutôt que la dernière valeur observée.
                 Humidite = featureReference.Humidite,
                 Pression = featureReference.Pression,
-                Saison = ResoudreSaisonMalgache(dateCible.Month)
+                Annee = dateCible.Year,
+                Mois = dateCible.Month,
+                Trimestre = ((dateCible.Month - 1) / 3) + 1,
+                JourSemaine = ToLundiZeroIndex(dateCible.DayOfWeek),
+                JourAnnee = dateCible.DayOfYear,
+                JourAnneeSin = (float)Math.Sin(2 * Math.PI * dateCible.DayOfYear / 365.25),
+                JourAnneeCos = (float)Math.Cos(2 * Math.PI * dateCible.DayOfYear / 365.25),
+                Saison = ResoudreSaisonMalgache(dateCible.Month),
+                WeatherType = MadagascarWeatherML.Models.WeatherType.Autre.ToString()
             };
 
             if (!_weatherTypeEngines.TryGetValue(horizon, out var moteur))
@@ -256,6 +276,11 @@ namespace MadagascarWeatherML.Inference
         /// WeatherFeatureEngineer et WeatherTypeDatasetBuilder (cohérence indispensable entre
         /// l'entraînement et l'inférence).
         /// </summary>
+        private static float ToLundiZeroIndex(DayOfWeek dayOfWeek)
+        {
+            return (int)dayOfWeek == 0 ? 6 : (int)dayOfWeek - 1;
+        }
+
         private static string ResoudreSaisonMalgache(int mois)
         {
             bool saisonChaudeEtPluvieuse = mois >= 11 || mois <= 4;

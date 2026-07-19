@@ -18,14 +18,22 @@ namespace MadagascarWeatherML.Training
     public class WeatherTypeTrainingRow
     {
         [LoadColumn(0)] [ColumnName("Province")] public string Province { get; set; }
-        [LoadColumn(1)] [ColumnName("Horizon")] public float Horizon { get; set; }
-        [LoadColumn(2)] [ColumnName("TemperatureFuture")] public float TemperatureFuture { get; set; }
-        [LoadColumn(3)] [ColumnName("PrecipitationFuture")] public float PrecipitationFuture { get; set; }
-        [LoadColumn(4)] [ColumnName("VentFutur")] public float VentFutur { get; set; }
-        [LoadColumn(5)] [ColumnName("Humidite")] public float Humidite { get; set; }
-        [LoadColumn(6)] [ColumnName("Pression")] public float Pression { get; set; }
-        [LoadColumn(7)] [ColumnName("Saison")] public string Saison { get; set; }
-        [LoadColumn(8)] [ColumnName("WeatherType")] public string WeatherType { get; set; }
+        [LoadColumn(1)] [ColumnName("Date")] public string Date { get; set; }
+        [LoadColumn(2)] [ColumnName("Horizon")] public float Horizon { get; set; }
+        [LoadColumn(3)] [ColumnName("TemperatureFuture")] public float TemperatureFuture { get; set; }
+        [LoadColumn(4)] [ColumnName("PrecipitationFuture")] public float PrecipitationFuture { get; set; }
+        [LoadColumn(5)] [ColumnName("VentFutur")] public float VentFutur { get; set; }
+        [LoadColumn(6)] [ColumnName("Humidite")] public float Humidite { get; set; }
+        [LoadColumn(7)] [ColumnName("Pression")] public float Pression { get; set; }
+        [LoadColumn(8)] [ColumnName("Annee")] public float Annee { get; set; }
+        [LoadColumn(9)] [ColumnName("Mois")] public float Mois { get; set; }
+        [LoadColumn(10)] [ColumnName("Trimestre")] public float Trimestre { get; set; }
+        [LoadColumn(11)] [ColumnName("JourSemaine")] public float JourSemaine { get; set; }
+        [LoadColumn(12)] [ColumnName("JourAnnee")] public float JourAnnee { get; set; }
+        [LoadColumn(13)] [ColumnName("JourAnneeSin")] public float JourAnneeSin { get; set; }
+        [LoadColumn(14)] [ColumnName("JourAnneeCos")] public float JourAnneeCos { get; set; }
+        [LoadColumn(15)] [ColumnName("Saison")] public string Saison { get; set; }
+        [LoadColumn(16)] [ColumnName("WeatherType")] public string WeatherType { get; set; }
     }
 
     /// <summary>Résultat d'évaluation d'un algorithme candidat de classification, pour un horizon donné.</summary>
@@ -37,6 +45,7 @@ namespace MadagascarWeatherML.Training
         public double MicroAccuracy { get; set; }
         public double F1Macro { get; set; }
         public double LogLoss { get; set; }
+        public string ConfusionMatrix { get; set; }
     }
 
     /// <summary>
@@ -94,10 +103,11 @@ namespace MadagascarWeatherML.Training
 
             for (int h = 1; h <= HorizonMax; h++)
             {
-                // Isole les lignes de cet horizon (FilterRowsByColumn filtre par plage inclusive
-                // sur une colonne numérique — ici une plage réduite à la seule valeur h).
+                // Isole les lignes de cet horizon. FilterRowsByColumn exige upperBound > lowerBound
+                // (borne supérieure exclusive côté ML.NET), donc on encadre l'entier h plutôt que
+                // d'utiliser une plage dégénérée [h, h] qui déclenche ArgumentOutOfRangeException.
                 IDataView dataHorizon = _mlContext.Data.FilterRowsByColumn(
-                    fullData, "Horizon", lowerBound: h, upperBound: h);
+                    fullData, "Horizon", lowerBound: h - 0.5, upperBound: h + 0.5);
 
                 var resultatHorizon = TrainHorizon(dataHorizon, h, modelsOutputDirectory);
                 rapportComplet.AddRange(resultatHorizon);
@@ -150,13 +160,17 @@ namespace MadagascarWeatherML.Training
                 MacroAccuracy = e.Metrics.MacroAccuracy,
                 MicroAccuracy = e.Metrics.MicroAccuracy,
                 F1Macro = CalculerF1Macro(e.Metrics),
-                LogLoss = e.Metrics.LogLoss
+                LogLoss = e.Metrics.LogLoss,
+                ConfusionMatrix = e.Metrics.ConfusionMatrix.GetFormattedConfusionTable()
             }).ToList();
 
-            // Sélection automatique : F1 Macro le plus élevé retenu comme critère principal —
-            // plus robuste que MicroAccuracy face au déséquilibre des classes (Orageux/Brouillard
-            // nettement plus rares que Nuageux/Ensoleille dans le climat malgache).
-            var meilleur = rapport.OrderByDescending(r => r.F1Macro).First();
+            // Sélection automatique conforme au cahier des charges : MacroAccuracy en critère
+            // principal, F1 Macro pour départager les égalités, puis LogLoss minimal.
+            var meilleur = rapport
+                .OrderByDescending(r => r.MacroAccuracy)
+                .ThenByDescending(r => r.F1Macro)
+                .ThenBy(r => r.LogLoss)
+                .First();
             var pipelineRetenu = candidats.First(c => c.Nom == meilleur.Algorithme).Pipeline;
 
             // Réentraînement final sur l'intégralité des données disponibles pour cet horizon.
@@ -184,6 +198,8 @@ namespace MadagascarWeatherML.Training
                 .Append(_mlContext.Transforms.Concatenate("Features",
                     "TemperatureFuture", "PrecipitationFuture", "VentFutur",
                     "Humidite", "Pression",
+                    "Annee", "Mois", "Trimestre", "JourSemaine", "JourAnnee",
+                    "JourAnneeSin", "JourAnneeCos",
                     "ProvinceEncoded", "SaisonEncoded"))
                 .Append(trainer)
                 .Append(_mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel", "PredictedLabel"));
@@ -225,7 +241,9 @@ namespace MadagascarWeatherML.Training
 
             foreach (var groupeProvince in lignes.GroupBy(r => r.Province))
             {
-                var ordonnees = groupeProvince.ToList();
+                var ordonnees = groupeProvince
+                    .OrderBy(r => r.Date, StringComparer.Ordinal)
+                    .ToList();
                 int indexCoupure = (int)(ordonnees.Count * FractionEntrainement);
 
                 trainRows.AddRange(ordonnees.Take(indexCoupure));
