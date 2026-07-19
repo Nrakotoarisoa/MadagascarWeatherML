@@ -273,3 +273,9 @@ Chaque horizon expose :
 - Ajouter des tests unitaires sur le tri chronologique, les lags et la génération des horizons.
 - Ajouter un export persistant des rapports de métriques en JSON/CSV.
 - En production web, remplacer les `PredictionEngine` cachés par `PredictionEnginePool`.
+
+## Dépannage
+
+### `ArgumentOutOfRangeException: Must be less than lowerBound (Parameter 'upperBound')`
+
+Cette erreur venait du filtrage des lignes WeatherType par horizon avec une plage dégénérée `lowerBound == upperBound` dans `FilterRowsByColumn`. ML.NET exige une borne supérieure strictement supérieure à la borne inférieure. Le filtrage utilise désormais une plage autour de l'entier d'horizon (`h - 0.5` à `h + 0.5`) afin de sélectionner uniquement les lignes `Horizon = h` sans déclencher l'exception.

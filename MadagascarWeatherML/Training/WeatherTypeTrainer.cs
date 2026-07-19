@@ -103,10 +103,11 @@ namespace MadagascarWeatherML.Training
 
             for (int h = 1; h <= HorizonMax; h++)
             {
-                // Isole les lignes de cet horizon (FilterRowsByColumn filtre par plage inclusive
-                // sur une colonne numérique — ici une plage réduite à la seule valeur h).
+                // Isole les lignes de cet horizon. FilterRowsByColumn exige upperBound > lowerBound
+                // (borne supérieure exclusive côté ML.NET), donc on encadre l'entier h plutôt que
+                // d'utiliser une plage dégénérée [h, h] qui déclenche ArgumentOutOfRangeException.
                 IDataView dataHorizon = _mlContext.Data.FilterRowsByColumn(
-                    fullData, "Horizon", lowerBound: h, upperBound: h);
+                    fullData, "Horizon", lowerBound: h - 0.5, upperBound: h + 0.5);
 
                 var resultatHorizon = TrainHorizon(dataHorizon, h, modelsOutputDirectory);
                 rapportComplet.AddRange(resultatHorizon);
