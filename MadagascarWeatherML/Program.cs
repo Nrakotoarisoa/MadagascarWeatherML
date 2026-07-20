@@ -104,7 +104,7 @@ namespace MadagascarWeatherML
             // --- Étape 8 : prédiction de démonstration à 7 jours -------------------------------
             Console.WriteLine("=== Étape 8/8 : prédiction de démonstration ===");
 
-            string province = "Antananarivo";
+            string province = "Fianarantsoa";
             DateTime dernierJourConnu = propre
                 .Where(r => r.Province == province)
                 .Select(r => DateTime.ParseExact(r.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture))
