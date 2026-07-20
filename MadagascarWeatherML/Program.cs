@@ -10,8 +10,6 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddWeatherApi(builder.Configuration);
 builder.Services.AddWeatherSwagger();
 
-// Architecture préparée pour extensions futures : AddAuthentication().AddJwtBearer(), AddRateLimiter(), versionnement d'API.
-
 var app = builder.Build();
 
 app.UseSwagger();

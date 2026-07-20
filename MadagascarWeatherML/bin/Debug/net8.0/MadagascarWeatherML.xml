@@ -1,0 +1,655 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>MadagascarWeatherML</name>
+    </assembly>
+    <members>
+        <member name="M:MadagascarWeatherML.Controllers.ModelsController.Status">
+            <summary>Retourne l'état des modèles ML.NET chargés en mémoire.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Controllers.ProvincesController.Get">
+            <summary>Liste les provinces disponibles dans l'API.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Controllers.WeatherController.Forecast(System.String,System.DateTime,System.Int32,System.Threading.CancellationToken)">
+            <summary>Retourne une prévision météo de 1 à 7 jours pour une province.</summary>
+            <example>GET /api/weather/forecast?province=Antananarivo&amp;startDate=2026-10-01&amp;days=7</example>
+        </member>
+        <member name="M:MadagascarWeatherML.Controllers.WeatherController.Day(System.String,System.DateTime,System.Threading.CancellationToken)">
+            <summary>Retourne la prévision météo d'un seul jour pour une province.</summary>
+            <example>GET /api/weather/day?province=Antananarivo&amp;date=2026-10-01</example>
+        </member>
+        <member name="T:MadagascarWeatherML.DataPreparation.DataCleaningReport">
+            <summary>Rapport détaillé du nettoyage, utile pour la traçabilité académique du pipeline.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.DataPreparation.DataCleaner">
+            <summary>
+            Nettoie les données brutes Open-Meteo (valeurs nulles, doublons, erreurs de mesure et
+            valeurs statistiquement aberrantes), puis trie le résultat par Province puis Date —
+            ordre requis pour que WeatherFeatureEngineer calcule correctement les variables historiques.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.DataCleaner.Clean(System.Collections.Generic.IEnumerable{MadagascarWeatherML.Models.WeatherRawData},MadagascarWeatherML.DataPreparation.DataCleaningReport@)">
+            <summary>
+            Exécute le nettoyage complet et retourne les données triées par Province puis Date,
+            prêtes pour l'étape de feature engineering.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.DataCleaner.RemoveNulls(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},MadagascarWeatherML.DataPreparation.DataCleaningReport)">
+            <summary>Supprime les lignes contenant une valeur nulle, vide ou NaN sur un champ requis.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.DataCleaner.RemoveDuplicates(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},MadagascarWeatherML.DataPreparation.DataCleaningReport)">
+            <summary>Supprime les doublons (Province + Date identiques), en conservant la première occurrence.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.DataCleaner.RemoveMeasurementErrors(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},MadagascarWeatherML.DataPreparation.DataCleaningReport)">
+            <summary>Supprime les erreurs de mesure : valeurs hors des bornes physiques réalistes ou incohérentes entre elles.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.DataCleaner.RemoveStatisticalOutliers(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},MadagascarWeatherML.DataPreparation.DataCleaningReport)">
+            <summary>
+            Détecte les valeurs statistiquement aberrantes par la méthode IQR (interquartile range),
+            appliquée séparément par province pour température, précipitation et vent — un climat
+            tropical (Toamasina) et un climat semi-aride (Toliara) n'ont pas la même distribution.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.DataPreparation.OpenMeteoCsvLoader">
+            <summary>
+            Charge un ou plusieurs fichiers CSV historiques Open-Meteo — un fichier par province de
+            Madagascar — et les fusionne en un seul IDataView ML.NET. Les exports Open-Meteo bruts ne
+            contiennent pas la province : elle est injectée ici à partir du mapping fourni par l'appelant.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.OpenMeteoCsvLoader.LoadMultipleProvinces(System.Collections.Generic.IDictionary{System.String,System.String})">
+            <summary>
+            Charge plusieurs fichiers CSV, un par province, et retourne un IDataView consolidé
+            (toutes provinces mélangées, non trié — le tri Province + Date est fait par l'appelant
+            après nettoyage, via DataCleaner puis WeatherFeatureEngineer).
+            </summary>
+            <param name="provinceFilePaths">
+            Dictionnaire associant le nom de chaque province malgache (Antananarivo, Fianarantsoa,
+            Toamasina, Mahajanga, Toliara, Antsiranana) au chemin de son fichier CSV Open-Meteo.
+            </param>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.OpenMeteoCsvLoader.LoadMultipleProvincesAsList(System.Collections.Generic.IDictionary{System.String,System.String})">
+            <summary>
+            Charge les lignes brutes de toutes les provinces sous forme de liste .NET, utile quand
+            l'appelant a besoin de manipuler les données en C# avant de reconstruire un IDataView
+            (cas du tri Province + Date et du nettoyage, effectués en amont de la conversion ML.NET).
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.OpenMeteoCsvLoader.LoadSingleProvinceFile(System.String,System.String)">
+            <summary>
+            Charge un unique fichier CSV Open-Meteo et assigne la province fournie à chaque ligne.
+            Supporte l'ancien format applicatif (date, latitude, longitude, temperature_moyenne...)
+            et l'export quotidien brut Open-Meteo présent dans data/ (métadonnées puis en-tête time,
+            temperature_2m_max, weather_code, temperature_2m_min, wind_speed_10m_max...).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.DataPreparation.WeatherFeatureEngineer">
+             <summary>
+             Transforme les données brutes nettoyées (triées par Province + Date) en un dataset enrichi
+             de variables temporelles et historiques, prêt à alimenter l'étape suivante du pipeline
+             (construction du dataset multi-horizon avec labels, non traitée dans cette classe).
+            
+             Chaque ligne produite correspond à un jour D pour une province donnée. Les 7 premiers jours
+             de chaque province sont exclus car ils ne disposent pas d'un historique suffisant pour
+             calculer le lag J-7 et les agrégats glissants sur 7 jours.
+             </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.WeatherFeatureEngineer.BuildFeatures(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},System.Collections.Generic.IDictionary{System.String,System.Single})">
+            <summary>
+            Construit la liste des features enrichies (variables calendaires, historiques,
+            géographiques). Ne produit aucun label ni horizon : voir NumericForecastDatasetBuilder
+            pour la construction des CSV avec labels J+1..J+7.
+            </summary>
+            <param name="cleanedSortedData">Données nettoyées, déjà triées par Province puis Date (sortie de DataCleaner).</param>
+            <param name="provinceAltitudes">Altitude connue (mètres) du chef-lieu de chaque province, si disponible.</param>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.WeatherFeatureEngineer.BuildClimatologieParJourCalendaire(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData})">
+            <summary>
+            Index construit à partir des (mois, jour) calendaires -> observations (année, valeurs),
+            utilisé pour calculer la climatologie ("valeur moyenne historique pour ce jour de l'année").
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.WeatherFeatureEngineer.GetClimatologie(System.Collections.Generic.Dictionary{System.ValueTuple{System.Int32,System.Int32},System.Collections.Generic.List{System.ValueTuple{System.Int32,System.Single,System.Single,System.Single}}},System.DateTime,System.Int32,System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData})">
+            <summary>
+            Climatologie = moyenne historique du même jour calendaire sur les années strictement
+            antérieures à l'année courante (évite toute fuite d'information depuis le futur).
+            Si aucune année antérieure n'est disponible (ex. première année du jeu de données),
+            on retombe sur la moyenne glissante sur 7 jours déjà calculée, pour éviter une valeur manquante.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.DataPreparation.WeatherFeatureEngineer.ResolveSaisonMalgache(System.Int32)">
+            <summary>
+            Découpage climatique malgache en 2 saisons (plus pertinent qu'un découpage à 4 saisons
+            occidentales) : saison chaude et pluvieuse (novembre à avril) vs saison fraîche et sèche
+            (mai à octobre).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Datasets.CsvDatasetWriter">
+            <summary>
+            Écriture CSV bas niveau, partagée par tous les générateurs de datasets d'entraînement.
+            N'effectue aucun tri ni filtrage : les lignes sont écrites dans l'ordre où elles sont
+            fournies, afin de préserver l'ordre chronologique strict établi en amont du pipeline.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Datasets.MLDatasetGenerator">
+             <summary>
+             Point d'entrée de l'étape "création des datasets ML". Assemble les 4 fichiers CSV, mais en
+             deux temps distincts car WeatherTypeTraining.csv dépend désormais des modèles de régression
+             déjà entraînés (voir WeatherTypeDatasetBuilder pour la justification) :
+            
+             1. GenerateNumericDatasets(...)   -> Temperature/Precipitation/WindTraining.csv (aucune dépendance)
+             2. (entraîner les 21 modèles de régression avec Temperature/Precipitation/WindTrainer)
+             3. GenerateWeatherTypeDataset(...) -> WeatherTypeTraining.csv (dépend des modèles de l'étape 2)
+            
+             Voir README.md, section "Ordre d'exécution du pipeline", pour la séquence complète.
+             </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.MLDatasetGenerator.GenerateNumericDatasets(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String)">
+            <summary>Génère les 3 CSV de régression. Ne fait aucun nettoyage ni feature engineering supplémentaire.</summary>
+            <param name="cleanedSortedRawData">Sortie de DataCleaner : triée par Province puis Date.</param>
+            <param name="engineeredFeatures">Sortie de WeatherFeatureEngineer : triée par Province puis Date.</param>
+            <param name="outputDirectory">Dossier de destination des 3 CSV.</param>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.MLDatasetGenerator.GenerateWeatherTypeDataset(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String,System.String,Microsoft.ML.MLContext)">
+            <summary>
+            Génère WeatherTypeTraining.csv à partir des sorties réelles des 21 modèles de régression.
+            Ne doit être appelée qu'après TemperatureTrainer/PrecipitationTrainer/WindTrainer.TrainAll().
+            </summary>
+            <param name="cleanedSortedRawData">Sortie de DataCleaner : triée par Province puis Date.</param>
+            <param name="engineeredFeatures">Sortie de WeatherFeatureEngineer : triée par Province puis Date.</param>
+            <param name="regressionModelsDirectory">Dossier contenant les 21 modèles de régression déjà entraînés.</param>
+            <param name="outputDirectory">Dossier de destination de WeatherTypeTraining.csv.</param>
+        </member>
+        <member name="T:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder">
+             <summary>
+             Construit les 3 datasets de régression multi-horizon (température, précipitation, vent)
+             au format "large" : une ligne par (province, date D), avec les features déjà calculées par
+             WeatherFeatureEngineer (donc strictement issues de données ≤ D) et 7 colonnes de label
+             (J+1 à J+7) correspondant aux valeurs réellement observées à D+1 ... D+7.
+            
+             Règle stricte : si l'une des 7 dates futures (D+1 ... D+7) est absente du jeu de données
+             (trou dans la série), la ligne entière est rejetée plutôt que d'être partiellement remplie
+             ou approximée — cela garantit qu'aucune donnée future n'est jamais mélangée à tort avec une
+             mauvaise date, et qu'aucun label n'est fabriqué.
+             </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder.#ctor(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData})">
+            <param name="cleanedSortedRawData">
+            Données brutes nettoyées, triées par Province puis Date (sortie de DataCleaner) —
+            sert uniquement à retrouver la valeur réelle observée aux dates futures D+1..D+7.
+            </param>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder.BuildTemperatureDataset(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String)">
+            <summary>Génère TemperatureTraining.csv (labels Temperature_J1 à Temperature_J7).</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder.BuildPrecipitationDataset(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String)">
+            <summary>Génère PrecipitationTraining.csv (labels Precipitation_J1 à Precipitation_J7).</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder.BuildWindDataset(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String)">
+            <summary>Génère WindTraining.csv (labels Wind_J1 à Wind_J7).</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.NumericForecastDatasetBuilder.BuildFeatureHeader">
+            <summary>
+            En-tête des features communes aux 3 datasets de régression : province, historique
+            température, humidité, pression, historique vent, historique précipitation, variables
+            temporelles — exactement l'ensemble demandé, déjà produit par WeatherFeatureEngineer.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Datasets.WeatherTypeDatasetBuilder">
+             <summary>
+             Construit WeatherTypeTraining.csv à partir des sorties RÉELLES des 21 modèles de régression
+             déjà entraînés (Temperature/Precipitation/Wind_J1..J7), et non des valeurs observées.
+            
+             Correction importante : une version précédente utilisait les valeurs météo réellement
+             observées comme "valeurs futures", ce qui entraînait un décalage entre l'entraînement
+             (le classifieur voyait des valeurs parfaites) et la production (il reçoit les sorties
+             imparfaites des modèles de régression). En scorant ici les modèles de régression déjà
+             entraînés sur l'historique, le classifieur apprend sur exactement le même type de données
+             — avec le même biais et le même bruit — qu'il recevra en production. C'est pour cette
+             raison que ce générateur ne peut être exécuté qu'APRÈS l'entraînement des 21 modèles de
+             régression (voir README.md, section "Ordre d'exécution du pipeline").
+            
+             Chaque horizon (1 à 7) produit ses propres lignes, car le niveau de bruit des prédictions
+             de régression augmente avec l'horizon (J+7 est nettement moins précis que J+1) : la colonne
+             Horizon est conservée dans le CSV pour permettre à WeatherTypeTrainer d'entraîner un
+             classifieur réellement distinct par horizon (et non un seul modèle dupliqué 7 fois).
+             </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.WeatherTypeDatasetBuilder.#ctor(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},Microsoft.ML.MLContext)">
+            <param name="cleanedSortedRawData">
+            Données brutes nettoyées, triées par Province puis Date (sortie de DataCleaner) —
+            sert à retrouver le WeatherType réellement observé à la date cible D+h.
+            </param>
+            <param name="mlContext">Contexte ML.NET partagé si l'appelant en a déjà un ; sinon un nouveau est créé.</param>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.WeatherTypeDatasetBuilder.BuildWeatherTypeDataset(System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherFeature},System.String,System.String)">
+            <summary>
+            Génère WeatherTypeTraining.csv. Doit être appelée après l'entraînement des 21 modèles
+            de régression (fichiers Temperature/Precipitation/Wind_J1..J7.zip présents dans
+            regressionModelsDirectory), puisque ce sont leurs sorties réelles qui alimentent ce dataset.
+            </summary>
+            <param name="engineeredFeatures">Sortie de WeatherFeatureEngineer (features au jour D, triées Province + Date).</param>
+            <param name="regressionModelsDirectory">Dossier contenant les 21 modèles de régression déjà entraînés.</param>
+            <param name="outputPath">Chemin de sortie de WeatherTypeTraining.csv.</param>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.WeatherTypeDatasetBuilder.MapCodeMeteoToWeatherType(System.Single)">
+            <summary>
+            Mapping des codes météo WMO fournis par Open-Meteo (colonne CodeMeteo) vers les 6
+            catégories métier. Basé sur la nomenclature standard WMO 4677 utilisée par Open-Meteo.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Datasets.WeatherTypeDatasetBuilder.ResolveSaisonMalgache(System.Int32)">
+            <summary>
+            Découpage climatique malgache en 2 saisons, identique à celui utilisé dans
+            WeatherFeatureEngineer et WeatherForecastEngine (cohérence indispensable).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Inference.WeatherForecastResult">
+            <summary>
+            Ligne de résultat retournée par le moteur, au format attendu par la future API ASP.NET
+            Core (les noms de propriétés en PascalCase se sérialisent en camelCase par défaut avec
+            System.Text.Json dans un contrôleur ASP.NET Core : "date", "province", "temperature", etc.).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Inference.WeatherTypeScoringInput">
+            <summary>Entrée du modèle de classification au moment du scoring (features "futures" = valeurs prédites par les 3 régressions).</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Inference.WeatherTypeScoringOutput">
+            <summary>Sortie brute du modèle de classification (le pipeline sauvegardé reconvertit déjà la clé en texte via MapKeyToValue).</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Inference.WeatherForecastEngine">
+             <summary>
+             Moteur d'inférence de bout en bout : à partir d'une province, d'une date de début et d'un
+             nombre de jours (1 à 7), reconstruit les features à partir de l'historique, appelle les
+             4 familles de modèles pour chaque horizon (Temperature_Jx, Precipitation_Jx, Wind_Jx,
+             WeatherType_Jx) et retourne la liste des prévisions au format WeatherForecastResult.
+            
+             Utilisation typique dans un contrôleur ASP.NET Core :
+             <code>
+             var resultats = _weatherForecastEngine.Predict(province: "Antananarivo", startDate: "2026-10-01", days: 7);
+             return Ok(resultats);
+             </code>
+            
+             Note production : cette classe met en cache un PredictionEngine par horizon et par famille
+             de modèle, ce qui n'est PAS thread-safe (limitation connue de ML.NET). Pour un déploiement
+             ASP.NET Core réel, il est recommandé d'enregistrer PredictionEnginePool&lt;TSrc,TDst&gt; en
+             DI (un pool par famille/horizon) plutôt que d'instancier ce moteur en singleton partagé ;
+             à défaut, instancier ce moteur en Scoped (une instance par requête HTTP) reste sûr.
+             </summary>
+        </member>
+        <member name="F:MadagascarWeatherML.Inference.WeatherForecastEngine._featureIndex">
+            <summary>Index (Province, Date) -> features déjà enrichies, construit une seule fois à l'initialisation du moteur.</summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Inference.WeatherForecastEngine.#ctor(System.String,System.Collections.Generic.List{MadagascarWeatherML.Models.WeatherRawData},System.Collections.Generic.IDictionary{System.String,System.Single})">
+            <param name="modelsDirectory">Dossier contenant les 28 fichiers .zip (Temperature/Precipitation/Wind/WeatherType_J1..J7).</param>
+            <param name="cleanedHistoricalData">
+            Données historiques nettoyées et triées (sortie de DataCleaner) : c'est l'étape "charger
+            les données historiques nécessaires" — faite une seule fois ici plutôt qu'à chaque appel
+            de Predict, puisque les features de tous les jours sont dérivées du même historique.
+            </param>
+            <param name="provinceAltitudes">Altitude connue du chef-lieu de chaque province, transmise telle quelle à WeatherFeatureEngineer.</param>
+        </member>
+        <member name="M:MadagascarWeatherML.Inference.WeatherForecastEngine.Predict(System.String,System.String,System.Int32)">
+            <summary>
+            Génère la prévision météo pour une province, à partir d'une date de début, sur un
+            nombre de jours donné (1 à 7 inclus).
+            </summary>
+            <example>Predict(province: "Antananarivo", startDate: "2026-10-01", days: 7)</example>
+        </member>
+        <member name="M:MadagascarWeatherML.Inference.WeatherForecastEngine.ToLundiZeroIndex(System.DayOfWeek)">
+            <summary>
+            Découpage climatique malgache en 2 saisons, identique à celui utilisé dans
+            WeatherFeatureEngineer et WeatherTypeDatasetBuilder (cohérence indispensable entre
+            l'entraînement et l'inférence).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WeatherFeature">
+             <summary>
+             Représente une ligne du dataset de features enrichies produit par WeatherFeatureEngineer :
+             une ligne par jour D et par province, avec toutes les variables calendaires, historiques et
+             géographiques nécessaires. Cette classe sert aussi directement d'entrée (TSrc) aux
+             PredictionEngine de régression, ses ColumnName correspondant exactement aux noms de
+             colonnes attendus par les pipelines entraînés (voir RegressionTrainerBase.BuildPipeline).
+            
+             Ne contient volontairement aucun label ni horizon : les labels J+1..J+7 sont ajoutés
+             séparément, directement dans les CSV, par NumericForecastDatasetBuilder — pas ici.
+             </summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Date">
+            <summary>Date de référence D de l'observation (format ISO yyyy-MM-dd).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Province">
+            <summary>Province malgache, utilisée en feature catégorielle (One-Hot Encoding).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Altitude">
+            <summary>Altitude approximative du chef-lieu de province (mètres), si disponible.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Annee">
+            <summary>Année civile de la date D.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Mois">
+            <summary>Mois (1-12) à la date D.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Trimestre">
+            <summary>Trimestre calendaire (1 à 4) de la date D.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.JourSemaine">
+            <summary>Jour de la semaine (0 = dimanche ... 6 = samedi) de la date D.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.JourAnnee">
+            <summary>Jour de l'année (1-366) à la date D.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.JourAnneeSin">
+            <summary>Encodage cyclique sinus du jour de l'année (saisonnalité sans discontinuité).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.JourAnneeCos">
+            <summary>Encodage cyclique cosinus du jour de l'année.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.Saison">
+            <summary>
+            Saison climatique malgache (feature catégorielle, One-Hot en aval) :
+            "SaisonChaudeEtPluvieuse" (novembre à avril) ou "SaisonFraicheEtSeche" (mai à octobre).
+            Ce découpage en 2 saisons est plus pertinent pour Madagascar que les 4 saisons occidentales,
+            et cohérent avec l'inversion des saisons de l'hémisphère Sud.
+            </summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.TemperatureClimatologie">
+            <summary>Moyenne climatologique historique de la température pour ce mois et cette province.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.TemperatureAnomalie">
+            <summary>Écart entre la valeur récente et la climatologie (anomalie court terme).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherFeature.PrecipitationCumul7j">
+            <summary>Cumul (somme) des précipitations sur les 7 derniers jours (mm) — plus pertinent qu'une moyenne pour la pluie.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WeatherType">
+            <summary>
+            Les 6 catégories de type de météo retournées par le système. L'ordre des valeurs doit
+            correspondre exactement au mapping utilisé lors de l'encodage du label LabelTypeMeteo
+            (KeyType count: 6) dans WeatherFeature.cs.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.TemperaturePredictionResult">
+            <summary>
+            Sortie brute du modèle de régression de température (LightGbmRegressionTrainer).
+            ML.NET nomme par défaut la colonne de sortie "Score" ; ColumnName la rend explicite.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.PrecipitationPredictionResult">
+            <summary>Sortie brute du modèle de régression de précipitation.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WindPredictionResult">
+            <summary>Sortie brute du modèle de régression de vitesse du vent.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WeatherTypePredictionResult">
+            <summary>
+            Sortie brute du modèle de classification multiclasse du type de météo. Corrigé : le
+            pipeline sauvegardé par WeatherTypeTrainer inclut un MapKeyToValue final, donc
+            PredictedLabel est déjà une chaîne texte ("Pluvieux", etc.) et non une clé (uint) —
+            contrairement à une version précédente de cette classe. Scores contient la distribution
+            de probabilité sur les classes (son maximum sert de "confidence" dans WeatherForecastEngine).
+            Voir aussi WeatherTypeScoringOutput dans WeatherForecastEngine.cs, structurellement identique.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WeatherPredictionResult">
+            <summary>
+            DTO générique de prévision pour un jour (une famille de modèles + un horizon). Conservé pour
+            référence/réutilisation éventuelle en dehors de l'API, mais le moteur d'inférence réel
+            (WeatherForecastEngine.Predict) retourne désormais WeatherForecastEngine.WeatherForecastResult,
+            dont les propriétés (Temperature, Precipitation, WindSpeed, WeatherType, Confidence) sont
+            nommées pour correspondre exactement au contrat JSON attendu par l'API.
+            </summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.Date">
+            <summary>Date prévue (D + Horizon).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.Province">
+            <summary>Province malgache concernée par la prévision.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.Horizon">
+            <summary>Horizon de prévision en jours (1 à 7) ayant généré cette ligne.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.TemperaturePrevue">
+            <summary>Température prévue (°C).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.PrecipitationPrevue">
+            <summary>Précipitations prévues (mm).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.VitesseVentPrevue">
+            <summary>Vitesse du vent prévue (km/h).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherPredictionResult.TypeMeteoPrevu">
+            <summary>Type de météo prévu, sous forme lisible.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Models.WeatherRawData">
+             <summary>
+             Représente une ligne brute telle qu'elle apparaît dans les fichiers CSV historiques
+             Open-Meteo (un fichier par province). Cette classe sert de modèle objet pour
+             OpenMeteoCsvLoader ; les attributs LoadColumn documentent le format réel du CSV à 12
+             colonnes, mais Province n'y figure pas (OpenMeteoCsvLoader fait un parsing manuel et
+             l'injecte lui-même — ces attributs ne sont donc pas utilisés par un TextLoader ML.NET ici).
+            
+             Ordre des colonnes attendu dans le CSV (avec en-tête) :
+             Date, Latitude, Longitude, TempMoyenne, TempMin, TempMax,
+             Humidite, Pression, Precipitation, VitesseVent, DirectionVent, CodeMeteo
+             </summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Date">
+            <summary>Date de l'observation, au format ISO (yyyy-MM-dd) telle que fournie par Open-Meteo.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Latitude">
+            <summary>Latitude de la station/province (degrés décimaux).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Longitude">
+            <summary>Longitude de la station/province (degrés décimaux).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Province">
+            <summary>
+            Nom de la province malgache (Antananarivo, Fianarantsoa, Toamasina, Mahajanga, Toliara,
+            Antsiranana). Absent du CSV source : injecté par OpenMeteoCsvLoader, pas d'attribut LoadColumn.
+            </summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.TemperatureMoyenne">
+            <summary>Température moyenne journalière (°C).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.TemperatureMinimale">
+            <summary>Température minimale journalière (°C).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.TemperatureMaximale">
+            <summary>Température maximale journalière (°C).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Humidite">
+            <summary>Humidité relative moyenne (%).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Pression">
+            <summary>Pression atmosphérique moyenne (hPa).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.Precipitation">
+            <summary>Cumul des précipitations journalières (mm).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.VitesseVent">
+            <summary>Vitesse moyenne du vent (km/h).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.DirectionVent">
+            <summary>Direction dominante du vent (degrés, 0-360).</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Models.WeatherRawData.CodeMeteo">
+            <summary>Code météo brut fourni par Open-Meteo (code WMO), à mapper vers les 6 catégories métier.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.CommonWeatherFeatureRow">
+            <summary>
+            Schéma des 27 colonnes de features communes aux 3 datasets de régression
+            (TemperatureTraining.csv, PrecipitationTraining.csv, WindTraining.csv), telles que produites
+            par NumericForecastDatasetBuilder. Les indices LoadColumn suivent exactement l'ordre
+            d'écriture du CSV — ne pas réordonner sans mettre à jour le générateur de dataset en amont.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.TemperatureTrainingRow">
+            <summary>Ligne de TemperatureTraining.csv : 27 features communes + 7 labels Temperature_J1..J7.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.PrecipitationTrainingRow">
+            <summary>Ligne de PrecipitationTraining.csv : 27 features communes + 7 labels Precipitation_J1..J7.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.WindTrainingRow">
+            <summary>Ligne de WindTraining.csv : 27 features communes + 7 labels Wind_J1..J7.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.PrecipitationTrainer">
+            <summary>
+            Entraîne les 7 modèles de précipitation (Precipitation_J1.zip à Precipitation_J7.zip) à
+            partir de PrecipitationTraining.csv. Pour chaque horizon, teste LightGbmRegression,
+            FastTreeRegression et FastForestRegression, puis retient automatiquement celui avec le
+            RMSE le plus faible.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.PrecipitationTrainer.TrainAll(System.String,System.String)">
+            <summary>
+            Entraîne les 7 horizons et écrit Precipitation_J1.zip ... Precipitation_J7.zip dans
+            modelsOutputDirectory. Peut être rappelée à tout moment avec un csvPath mis à jour
+            pour réentraîner les modèles sur de nouvelles données.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.HorizonTrainingResult">
+            <summary>Résultat d'entraînement pour un horizon (J+1 à J+7) d'une cible donnée.</summary>
+        </member>
+        <member name="P:MadagascarWeatherML.Training.HorizonTrainingResult.ComparaisonAlgorithmes">
+            <summary>Détail RMSE/MAE/R² des 3 algorithmes testés, pour traçabilité académique.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.RegressionTrainerBase`1">
+             <summary>
+             Base commune aux 3 entraîneurs de régression (température, précipitation, vent). Pour un
+             horizon donné : charge le CSV, sépare train/test de façon strictement chronologique (par
+             province), entraîne 3 algorithmes candidats (LightGbm, FastTree, FastForest), les évalue
+             (RMSE, MAE, R²), sélectionne automatiquement le meilleur, puis le réentraîne sur l'ensemble
+             des données disponibles avant de sauvegarder le modèle final au format .zip.
+            
+             Conçue pour être réutilisée pour un réentraînement futur : il suffit de rappeler TrainHorizon
+             (ou TrainAll dans les sous-classes) avec un CSV mis à jour — aucun état n'est conservé entre deux appels.
+             </summary>
+             <typeparam name="TRow">Classe de schéma du CSV (doit hériter de CommonWeatherFeatureRow).</typeparam>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.RegressionTrainerBase`1.TrainHorizon(System.String,System.String,System.String)">
+            <summary>
+            Entraîne, évalue et sélectionne automatiquement le meilleur modèle pour un horizon donné,
+            puis sauvegarde le modèle final réentraîné sur toutes les données disponibles.
+            </summary>
+            <param name="csvPath">Chemin du CSV d'entraînement (Temperature/Precipitation/WindTraining.csv).</param>
+            <param name="labelColumnName">Colonne label à prédire pour cet horizon (ex. "Temperature_J3").</param>
+            <param name="outputModelPath">Chemin de sortie du modèle .zip (ex. Models/Temperature_J3.zip).</param>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.RegressionTrainerBase`1.BuildPipeline(Microsoft.ML.IEstimator{Microsoft.ML.ITransformer})">
+            <summary>
+            Pipeline de préprocessing commun aux 3 cibles : encodage catégoriel de Province et
+            Saison, puis concaténation de toutes les features numériques et encodées en un seul
+            vecteur "Features", avant d'enchaîner sur le trainer fourni.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.RegressionTrainerBase`1.SplitChronologiquementParProvince(Microsoft.ML.IDataView)">
+            <summary>
+            Sépare train/test de façon strictement chronologique, indépendamment pour chaque
+            province : les FractionEntrainement (80%) premiers jours de chaque province vont à
+            l'entraînement, les plus récents (20%) au test. Un split global naïf sur l'ordre brut
+            du fichier mélangerait les provinces (le CSV est trié Province puis Date) ; ce découpage
+            par groupe garantit qu'aucune province n'est absente du test et qu'aucune date de test
+            n'est antérieure à une date d'entraînement pour la même province.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.TemperatureTrainer">
+            <summary>
+            Entraîne les 7 modèles de température (Temperature_J1.zip à Temperature_J7.zip) à partir
+            de TemperatureTraining.csv. Pour chaque horizon, teste LightGbmRegression, FastTreeRegression
+            et FastForestRegression, puis retient automatiquement celui avec le RMSE le plus faible.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.TemperatureTrainer.TrainAll(System.String,System.String)">
+            <summary>
+            Entraîne les 7 horizons et écrit Temperature_J1.zip ... Temperature_J7.zip dans
+            modelsOutputDirectory. Peut être rappelée à tout moment avec un csvPath mis à jour
+            pour réentraîner les modèles sur de nouvelles données (aucun état conservé entre appels).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.WeatherTypeTrainingRow">
+            <summary>
+            Schéma de WeatherTypeTraining.csv (produit par WeatherTypeDatasetBuilder, après entraînement
+            des modèles de régression). TemperatureFuture/PrecipitationFuture/VentFutur sont les sorties
+            RÉELLES des modèles de régression scorés sur l'historique — pas des valeurs observées —,
+            ce qui correspond exactement à ce que le classifieur recevra en production.
+            Horizon (1 à 7) permet de sélectionner, à l'entraînement, le sous-ensemble propre à chaque
+            modèle WeatherType_Jx (le bruit des prédictions de régression augmente avec l'horizon).
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.ClassificationEvaluationResult">
+            <summary>Résultat d'évaluation d'un algorithme candidat de classification, pour un horizon donné.</summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.WeatherTypeTrainer">
+             <summary>
+             Entraîne les 7 modèles de classification du type de météo (WeatherType_J1.zip à
+             WeatherType_J7.zip) à partir de WeatherTypeTraining.csv. Pour chaque horizon, filtre les
+             lignes correspondantes (colonne Horizon), teste LightGbm multiclasse, SdcaMaximumEntropy et
+             FastTree multiclasse (via OneVersusAll, ML.NET ne proposant pas de FastTree multiclasse
+             natif), puis sélectionne automatiquement le meilleur sur le F1 Macro.
+            
+             Correction par rapport à une version précédente : les 7 modèles sont désormais réellement
+             distincts (un entraînement par horizon), et non un unique modèle dupliqué 7 fois. Ce
+             changement est nécessaire car TemperatureFuture/PrecipitationFuture/VentFutur sont désormais
+             les sorties réelles des modèles de régression : leur distribution de bruit dépend de
+             l'horizon (J+7 nettement plus incertain que J+1), donc le classifieur optimal peut différer
+             d'un horizon à l'autre.
+            
+             Note de cohérence projet : WeatherTypeTraining.csv est construit avec 6 catégories
+             (Ensoleille, Nuageux, Pluvieux, Orageux, Brouillard, Autre — voir enum WeatherType), la
+             6e servant de repli pour les codes météo WMO non couverts par Sunny/Cloudy/Rain/Storm/Fog.
+             Mapping conceptuel : Sunny=Ensoleille, Cloudy=Nuageux, Rain=Pluvieux, Storm=Orageux,
+             Fog=Brouillard, Autre=repli. Le pipeline reste entièrement piloté par les valeurs réellement
+             présentes dans le CSV (MapValueToKey), donc aucun changement de code n'est requis si les
+             libellés évoluent.
+             </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.WeatherTypeTrainer.TrainAll(System.String,System.String)">
+            <summary>
+            Entraîne les 7 horizons et écrit WeatherType_J1.zip ... WeatherType_J7.zip dans
+            modelsOutputDirectory. Doit être appelée après la génération de WeatherTypeTraining.csv
+            (elle-même postérieure à l'entraînement des modèles de régression — voir README.md).
+            Peut être rappelée à tout moment avec un csvPath mis à jour pour réentraîner sur de
+            nouvelles données (aucun état conservé entre deux appels).
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.WeatherTypeTrainer.BuildPipeline(Microsoft.ML.IEstimator{Microsoft.ML.ITransformer})">
+            <summary>
+            Pipeline complet : encodage catégoriel (Province, Saison), concaténation des features,
+            conversion du label texte en clé (MapValueToKey, requis par les trainers multiclasse),
+            puis reconversion de la prédiction en libellé texte lisible (MapKeyToValue) — le modèle
+            sauvegardé produit donc directement une chaîne ("Pluvieux", etc.) et non une clé numérique.
+            Horizon n'est volontairement pas inclus dans Features : il sert uniquement à isoler le
+            sous-ensemble d'entraînement propre à ce modèle, pas de feature au sein d'un même modèle.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.WeatherTypeTrainer.CalculerF1Macro(Microsoft.ML.Data.MulticlassClassificationMetrics)">
+            <summary>
+            ML.NET n'expose pas directement un "F1 Macro" dans MulticlassClassificationMetrics :
+            on le calcule à partir de la précision et du rappel par classe de la matrice de
+            confusion (F1_classe = 2·P·R / (P+R), puis moyenne non pondérée sur toutes les classes).
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.WeatherTypeTrainer.SplitChronologiquementParProvince(Microsoft.ML.IDataView)">
+            <summary>
+            Split chronologique strict par province (mêmes garanties que pour les entraîneurs de
+            régression) : 80% les plus anciens en entraînement, 20% les plus récents en test,
+            indépendamment pour chaque province — jamais de mélange futur/passé.
+            </summary>
+        </member>
+        <member name="T:MadagascarWeatherML.Training.WindTrainer">
+            <summary>
+            Entraîne les 7 modèles de vent (Wind_J1.zip à Wind_J7.zip) à partir de WindTraining.csv.
+            Pour chaque horizon, teste LightGbmRegression, FastTreeRegression et FastForestRegression,
+            puis retient automatiquement celui avec le RMSE le plus faible.
+            </summary>
+        </member>
+        <member name="M:MadagascarWeatherML.Training.WindTrainer.TrainAll(System.String,System.String)">
+            <summary>
+            Entraîne les 7 horizons et écrit Wind_J1.zip ... Wind_J7.zip dans modelsOutputDirectory.
+            Peut être rappelée à tout moment avec un csvPath mis à jour pour réentraîner les
+            modèles sur de nouvelles données.
+            </summary>
+        </member>
+    </members>
+</doc>
