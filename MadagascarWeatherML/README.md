@@ -283,3 +283,23 @@ Cette erreur venait du filtrage des lignes WeatherType par horizon avec une plag
 ### `Could not find input column 'WeatherType'`
 
 Cette erreur peut survenir en prédiction si le modèle WeatherType sauvegardé contient encore le transform de label `MapValueToKey("Label", "WeatherType")`. Même si le label n'est pas utilisé pour scorer, ML.NET exige que la colonne source existe quand il construit le `PredictionEngine`. L'entrée de scoring fournit donc une valeur factice `WeatherType = "Autre"`; elle ne sert pas à la prédiction mais satisfait le schéma attendu par la chaîne de transforms.
+
+## API ASP.NET Core d'inférence
+
+Cette API expose uniquement les modèles ML.NET déjà entraînés dans `Models/` ; elle ne déclenche aucun entraînement et ne modifie jamais les fichiers `.zip`.
+
+### Analyse et choix d'architecture
+
+- Les modèles sont chargés une seule fois au démarrage par `ModelRegistry`, puis conservés en mémoire pour éviter les accès disque à chaque requête.
+- Les services de prédiction spécialisés (`TemperaturePredictionService`, `PrecipitationPredictionService`, `WindPredictionService`, `WeatherTypePredictionService`) isolent chaque famille de modèles, tandis que `WeatherForecastService` orchestre le scénario métier complet.
+- `PredictionEngine` n'étant pas thread-safe, l'API utilise un moteur par famille/horizon protégé par verrou. Cette stratégie est simple et sûre ; elle pourra être remplacée par `PredictionEnginePool` si un débit plus élevé est requis.
+- L'architecture DI et les extensions `AddWeatherApi` / `AddWeatherSwagger` préparent l'ajout ultérieur de JWT, rate limiting et versionnement sans modifier les contrôleurs.
+
+### Endpoints
+
+- `GET /api/weather/forecast?province=Antananarivo&startDate=2026-10-01&days=7`
+- `GET /api/weather/day?province=Antananarivo&date=2026-10-01`
+- `GET /api/provinces`
+- `GET /api/models/status`
+
+La documentation interactive est disponible via Swagger à l'adresse `/swagger`.
